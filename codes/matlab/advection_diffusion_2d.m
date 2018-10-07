@@ -35,7 +35,7 @@
 %                                                                         %
 %-------------------------------------------------------------------------%
 %                                                                         %
-%  Code: 1D advection-diffusion by the FTCS scheme                        %
+%  Code: 2D advection-diffusion by the FTCS scheme                        %
 %        The code is adapted and extended from Tryggvason, Computational  %
 %        Fluid Dynamics http://www.nd.edu/~gtryggva/CFD-Course/           %
 %                                                                         %
@@ -43,90 +43,85 @@
 close all;
 clear variables;
 
-% Data
-%-------------------------------------------------------------------------%
-np=21;              % number of grid points                
-nstep=100;          % number of time steps
-length=2.0;         % domain length [m]
-h=length/(np-1);    % grid step [m]
-dt=0.05;            % time step [s]
-u=1;                % velocity [m/s]
-D=0.05;             % diffusion coefficient [m2/s]
-A=0.5;              % amplitude of initial solution
-k=1;                % wave number [1/m]
+% two-dimensional unsteady diffusion by the FTCS scheme
+%------------------------------------------------------------
+nx=33;                  % number of grid points along x
+ny=33;                  % number of grid points along y
+nstep=150;              % number of time steps
+lengthx=2.0;            % domain length along x [m]
+lengthy=2.0;            % domain length along y [m]
+hx=lengthx/(nx-1);      % grid step along x [m]
+hy=lengthy/(ny-1);      % grid step along y [m] 
+D=0.025;                % diffusion coefficient [m2/s]
+u=-1;                   % velocity along x [m/s]
+v= 0;                   % velocity along y [m/s]
+
+% Time step limits
+sigma = 0.75;                     % safety coefficient
+dt_diff  = 1/4*hx*hy/D;           % diffusion [s]
+dt_conv = 4*D/(u^2+v^2);          % convection [s]
+dt = sigma*min(dt_diff, dt_conv); % time step [s]
 
 % Memory allocation
-%-------------------------------------------------------------------------%
-f=zeros(np,1);      % temporary numerical solution
-y=zeros(np,1);      % current numerical solution
-a=zeros(np,1);      % exact solution
+f=zeros(nx,ny);     % current numerical solution
+fo=zeros(nx,ny);    % previous numerical solution
 
-% Video setup
-%-------------------------------------------------------------------------%
-v = VideoWriter('advection_diffusion_1d.mp4', 'MPEG-4');
-open(v);
+% Grid axes
+xaxis = 0:hx:lengthx;
+yaxis = 0:hy:lengthy;
 
-% Initial solution
-%-------------------------------------------------------------------------%
-for i=1:np
-	y(i)=A*sin(2*pi*k*h*(i-1)); 
-end
+% Boundary conditions
+f(nx, ny*1/3:ny*2/3) = 1;
 
-% Loop over time
-%-------------------------------------------------------------------------%
-t=0.; 
-for m=1:nstep 
-	
-    % Exact solution
-    for i=1:np 
-		a(i) = A*exp(-4*pi*pi*k*k*D*t)*sin(2*pi*k*(h*(i-1)-u*t)); 
-    end
+% Prepare video
+videompg4 = VideoWriter('advection_diffusion_2d.mp4', 'MPEG-4');
+open(videompg4);
+
+% Time loop
+t = 0;
+for l=1:nstep
     
-    % Integrals (post processing only)
-    a2_int = 0.;
-    y2_int = 0.;
-    for i=1:np-1
-         a2_int = a2_int + h/2*(a(i)^2+a(i+1)^2);
-         y2_int = y2_int + h/2*(y(i)^2+y(i+1)^2);
-    end
-         
-    % Plots
-    message = sprintf('time=%d\na^2(int)=%d\ny^2(int)=%d', t, a2_int, y2_int);
-	hold off; plot([0:h:length],y,'linewidth',2); axis([0 length -1, 1]); % plot num. 
-	hold on; plot([0:h:length],a,'r','linewidth',2);                      % plot exact
-    hold on; legend('numerical', 'exact');                  % legend
-    xlabel('spatial coordinate [m]');
-    ylabel('solution');    
-    time = annotation('textbox',[0.15 0.8 0.1 0.1],'String',message,'EdgeColor','none');
+    % Graphics only
+	hold off; 
+    mesh(xaxis, yaxis, f'); 
+    axis([0 lengthx 0 lengthy 0 1.25]);
+    xlabel('x'); ylabel('y'); zlabel('f');
+    message = sprintf('time=%d\n', t);
+    time = annotation('textbox',[0.15 0.8 0.15 0.15],'String',message,'EdgeColor','none');
     frame = getframe(gcf);
-    writeVideo(v,frame);
+    writeVideo(videompg4,frame);
     delete(time);
     
-    % Temporary solution 
-	f=y; 
-    
-    % Numerical solution (internal points)
-    for i=2:np-1 
-		y(i) = f(i)-(u*dt/2/h)*(f(i+1)-f(i-1))+...    % advection
-			   D*(dt/h^2)*(f(i+1)-2*f(i)+f(i-1));     % diffusion
-    end 
-    
-    % Numerical solution (periodic boundary conditions)
-	y(np) = f(np)-(u*dt/2/h)*(f(2)-f(np-1))+...
-            D*(dt/h^2)*(f(2)-2*f(np)+f(np-1)); 
-	y(1)  = y(np);
-    
-    % Calculate error
-    E = 0;
-    for i=1:np 
-        E = E + (y(i)-a(i))^2;
+    % Forward Euler
+    fo=f;
+    for i=2:nx-1
+        for j=2:ny-1
+            f(i,j) = fo(i,j)...
+                    -(0.5*dt*u/hx)*(fo(i+1,j)-fo(i-1,j))...
+                    -(0.5*dt*v/hy)*(fo(i,j+1)-fo(i,j-1))...
+                    +(D*dt/hx^2)*(fo(i+1,j)-2*fo(i,j)+fo(i-1,j))...
+                    +(D*dt/hy^2)*(fo(i,j+1)-2*fo(i,j)+fo(i,j-1));
+        end
     end
-    E = h*sqrt(E);
+    
+    % Boundary conditions: south side (Neumann)
+    for i=1:nx
+        f(i,1)=f(i,2);
+    end
+    
+    % Boundary conditions: north side (Neumann)
+    for i=1:nx
+        f(i,ny)=f(i,ny-1);
+    end
+    
+    % Boundary conditions: west side (Neumann)
+    for j=1:ny
+        f(1,j)=f(2,j);
+    end
     
     % Advance time
-	t=t+dt; 
-    fprintf('time=%d E=%e\n', t, E);
+    t=t+dt;
     
 end
 
-close(v);
+close(videompg4);
